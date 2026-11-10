@@ -702,6 +702,21 @@ static inline bool getStrategyByHeuristics(HW hw, GEMMStrategy &strategy, bool l
     if (localA && !localB)
         s.loadBFirst = true;
 
+    if ((hw == HW::XeHPC || hw == HW::Xe2) && !systolic) {
+        if (!localA && problem.Ta_ext == Type::f32
+                && problem.A.layout == MatrixLayout::N) {
+            s.slmA = false;
+            s.ka_load = 8;
+            s.prefetchA = s.prefetchAMasked = 2 * s.ka_load;
+            s.ka_prefetch = s.ka_pfStride = s.ka_load;
+        }
+        if (!localB && problem.Tb_ext == Type::f32) {
+            s.slmB = false;
+            s.kb_load = 8;
+            s.prefetchB = s.prefetchBMasked = 2 * s.kb_load;
+            s.kb_prefetch = s.kb_pfStride = s.kb_load;
+        }
+    }
     if (s.slmA || s.slmB) {
         s.slmBuffersA = s.slmBuffersB = 1;
         s.unrollKSLM = std::max(int(s.slmA) * s.ka_load, int(s.slmB) * s.kb_load);
