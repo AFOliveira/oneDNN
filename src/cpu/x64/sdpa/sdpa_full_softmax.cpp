@@ -547,9 +547,31 @@ status_t configure(const sdpa_full_softmax_params_t &params,
     // (hs_qk + hs_v) * mm_dt_sz / q_block, stay below the ~16..24 bytes of
     // score-tile traffic per element. Threads working on the same KV head at
     // the same time share its K/V through L3, which halves the bound once more
-    // than two threads do.
+    // than two threads do. That is the case when there are more threads than
+    // twice the KV heads, or with interleave_items: per_head and
+    // kv_head_group then deal work items to threads round-robin, so
+    // concurrent threads work on neighboring query blocks of one KV head.
+    // With a contiguous range of work items per thread, each thread instead
+    // works on its own KV head and reuses its K/V from L2 across its query
+    // blocks. That is faster while the K/V of all concurrently processed KV
+    // heads stay in L3 next to the threads' score tiles, but once they
+    // overflow, every query block reads K/V from memory again (GNR, bf16,
+    // 8x8x16385x256 GQA: 3.2 s contiguous vs 1.9 s interleaved; 4x32x1024x128,
+    // which fits: 4.3 ms vs 5.4 ms). Interleaving needs several query blocks
+    // per head; q_block never exceeds q_block_max.
     const dim_t kv_heads_total = p_.batch * num_head_kv;
-    const bool kv_shared_in_l3 = 2 * kv_heads_total < conf.nthr;
+    const double concurrent_kv_bytes
+            = static_cast<double>(nstl::min<dim_t>(conf.nthr, kv_heads_total))
+            * p_.seq_kv * (p_.hs_qk + p_.hs_v) * mm_dt_sz;
+    const double l3_left_bytes = static_cast<double>(conf.nthr)
+            * (static_cast<double>(platform::get_per_core_cache_size(3))
+                    - score_tile_target_bytes);
+    conf.interleave_items
+            = p_.seq_q > q_block_max && concurrent_kv_bytes > l3_left_bytes;
+    if (!getenv_int_user("SDPA_INTERLEAVE_TMP", 1)) // TMP A/B switch
+        conf.interleave_items = false;
+    const bool kv_shared_in_l3
+            = 2 * kv_heads_total < conf.nthr || conf.interleave_items;
     const float q_rows_min
             = (p_.hs_qk + p_.hs_v) / (kv_shared_in_l3 ? 16.f : 8.f);
     // Query rows of one work item: per-head q_block, or the rows of all heads
@@ -1110,7 +1132,7 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                 "d_qk=%lld d_v=%lld dt_bytes=%lld q_block=%lld "
                 "mm1_block=%lld mm2_block=%lld nthr=%d schedule=%d "
                 "mm1_chunks=%lld mm2_chunks=%lld l2_per_core=%u "
-                "l3_per_core=%u\n",
+                "l3_per_core=%u interleave=%d\n",
                 static_cast<long long>(p_.seq_q),
                 static_cast<long long>(p_.seq_kv),
                 static_cast<long long>(p_.num_head_q),
@@ -1125,7 +1147,8 @@ status_t configure(const sdpa_full_softmax_params_t &params,
                 static_cast<long long>(conf.split_kv.mm1_chunks),
                 static_cast<long long>(conf.split_kv.mm2_chunks),
                 platform::get_per_core_cache_size(2),
-                platform::get_per_core_cache_size(3));
+                platform::get_per_core_cache_size(3),
+                static_cast<int>(conf.interleave_items));
     }
 
     return status::success;
@@ -1568,10 +1591,9 @@ void execute_fused(const exec_state_t &st, int nthr) {
     const auto &ts = conf.thread_scratch;
     const size_t q_block = static_cast<size_t>(conf.q_block);
     const dim_t n_qblk = utils::div_up(p.seq_q, conf.q_block);
-    parallel_nd_ext(nthr, p.batch, p.num_head_q / conf.query_heads_per_item,
-            n_qblk,
-            [&](int tid, int, dim_t batch_idx, dim_t item_head_idx,
-                    dim_t q_block_idx) {
+    const dim_t n_items = p.num_head_q / conf.query_heads_per_item;
+    auto body = [&](int tid, dim_t batch_idx, dim_t item_head_idx,
+                        dim_t q_block_idx) {
         char *my_scratch = st.thread_scratch(tid);
         const item_tiles_t scores
                 = {my_scratch, q_block * conf.ld_scores * sizeof(float)};
@@ -1591,6 +1613,20 @@ void execute_fused(const exec_state_t &st, int nthr) {
             item.mm2(0, p.seq_kv, prob, pv);
             item.store(pv);
         }
+    };
+    if (conf.interleave_items) {
+        const dim_t work = p.batch * n_items * n_qblk;
+        parallel(nthr, [&](int ithr, int team) {
+            for (dim_t i = ithr; i < work; i += team)
+                body(ithr, i / (n_items * n_qblk), (i / n_qblk) % n_items,
+                        i % n_qblk);
+        });
+        return;
+    }
+    parallel_nd_ext(nthr, p.batch, n_items, n_qblk,
+            [&](int tid, int, dim_t batch_idx, dim_t item_head_idx,
+                    dim_t q_block_idx) {
+        body(tid, batch_idx, item_head_idx, q_block_idx);
     });
 }
 
