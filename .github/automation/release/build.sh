@@ -36,6 +36,7 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 INSTALL_DIR="$1"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 GCC_ROOT="${DEVTOOLSET_ROOTPATH:+$DEVTOOLSET_ROOTPATH/usr}"
 GXX="${GCC_ROOT:+$GCC_ROOT/bin/}g++"
@@ -48,10 +49,12 @@ case "$COMPILER" in
         export CXX="$GXX"
         ;;
     riscv64-gcc)
-        export CC=riscv64-linux-gnu-gcc-14
-        export CXX=riscv64-linux-gnu-g++-14
+        export CC=riscv64-linux-gnu-gcc-13
+        export CXX=riscv64-linux-gnu-g++-13
         CMAKE_EXTRA_ARGS+=(
-            -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/riscv64.cmake"
+            -DCMAKE_TOOLCHAIN_FILE="$SCRIPT_DIR/../../../cmake/toolchains/riscv64.cmake"
+            -DCMAKE_C_COMPILER="$CC"
+            -DCMAKE_CXX_COMPILER="$CXX"
         )
         # Keep the release smoke test short under QEMU.
         CTEST_ARGS=(--no-tests=error -R "^cpu-primitives-matmul-cpp$")

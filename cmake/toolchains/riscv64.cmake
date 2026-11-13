@@ -1,5 +1,6 @@
 # *******************************************************************************
 # Copyright 2025 Intel Corporation
+# Copyright 2026 Institute of Software, Chinese Academy of Sciences
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,8 +21,8 @@ set(CMAKE_SYSTEM_NAME Linux)
 set(CMAKE_SYSTEM_PROCESSOR riscv64)
 
 # Cross-compilation tools
-set(CMAKE_C_COMPILER riscv64-linux-gnu-gcc-14)
-set(CMAKE_CXX_COMPILER riscv64-linux-gnu-g++-14)
+set(CMAKE_C_COMPILER riscv64-linux-gnu-gcc-14 CACHE STRING "RISC-V C compiler")
+set(CMAKE_CXX_COMPILER riscv64-linux-gnu-g++-14 CACHE STRING "RISC-V C++ compiler")
 
 # Search paths
 set(CMAKE_FIND_ROOT_PATH /usr/riscv64-linux-gnu)

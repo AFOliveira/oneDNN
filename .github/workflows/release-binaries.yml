@@ -149,6 +149,7 @@ jobs:
     env:
       CTEST_PARALLEL_LEVEL: 4
       COMPILER: riscv64-gcc
+      GCC_PACKAGE_VERSION: 13.2.0-23ubuntu4cross1
       CPU_RUNTIME: OMP
       GPU_RUNTIME: NONE
       PKG_NAME: onednn-${{ needs.prepare.outputs.tag }}-omp-linux-riscv64
@@ -159,7 +160,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: ci
-          sparse-checkout: .github/automation/release
+          sparse-checkout: |
+            .github/automation/release
+            cmake/toolchains
           persist-credentials: false
 
       - name: Checkout oneDNN
@@ -177,7 +180,16 @@ jobs:
       - name: Install build tools and cross compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-14-riscv64-linux-gnu g++-14-riscv64-linux-gnu
+          sudo apt-get install -y \
+            gcc-13-riscv64-linux-gnu="$GCC_PACKAGE_VERSION" \
+            g++-13-riscv64-linux-gnu="$GCC_PACKAGE_VERSION" \
+            cpp-13-riscv64-linux-gnu="$GCC_PACKAGE_VERSION" \
+            gcc-13-riscv64-linux-gnu-base="$GCC_PACKAGE_VERSION" \
+            gcc-13-cross-base="$GCC_PACKAGE_VERSION" \
+            libgcc-13-dev-riscv64-cross="$GCC_PACKAGE_VERSION" \
+            libstdc++-13-dev-riscv64-cross="$GCC_PACKAGE_VERSION"
+          riscv64-linux-gnu-gcc-13 --version
+          riscv64-linux-gnu-g++-13 --version
           pipx install ninja==1.13.2
 
       - name: Build and test
