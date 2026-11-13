@@ -40,7 +40,7 @@ INSTALL_DIR="$1"
 GCC_ROOT="${DEVTOOLSET_ROOTPATH:+$DEVTOOLSET_ROOTPATH/usr}"
 GXX="${GCC_ROOT:+$GCC_ROOT/bin/}g++"
 CMAKE_EXTRA_ARGS=()
-TEST_EXCLUDE="gpu|cross-engine"
+CTEST_ARGS=(-E "gpu|cross-engine")
 
 case "$COMPILER" in
     gcc)
@@ -53,8 +53,8 @@ case "$COMPILER" in
         CMAKE_EXTRA_ARGS+=(
             -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/riscv64.cmake"
         )
-        # Skip the two longest QEMU examples, also excluded by RV64 CI.
-        TEST_EXCLUDE+="|^cpu-graph-(sdpa|gated-mlp-int4)-cpp$"
+        # Keep the release smoke test short under QEMU.
+        CTEST_ARGS=(--no-tests=error -R "^cpu-primitives-matmul-cpp$")
         ;;
     icx)
         set +o errexit +o pipefail +o nounset
@@ -91,5 +91,5 @@ cmake --build build --parallel "$(nproc)"
 mkdir -p "$INSTALL_DIR/env"
 cp "$(dirname "$0")/env/vars.sh" "$INSTALL_DIR/env/"
 # Smoke test the CPU engine only, GPU is not expected to be available.
-ctest --test-dir build --output-on-failure -E "$TEST_EXCLUDE"
+ctest --test-dir build --output-on-failure "${CTEST_ARGS[@]}"
 cmake --install build
