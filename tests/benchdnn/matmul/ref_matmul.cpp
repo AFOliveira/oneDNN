@@ -183,20 +183,13 @@ static chunk_params_t make_chunk_params(const prb_t *prb, const args_t &args) {
     p.N = prb->n;
     p.K = prb->k;
 
-    // Grouped memory has no strides to query, it is dense with the variable
-    // dim outermost (variable dim 1 means col-major)
-    const auto &so = prb->sparse_options;
-    const bool src_col_major = so.get_variable_dim_idx(DNNL_ARG_SRC) == 1;
-    p.src_m_stride = src_col_major ? 1 : prb->k;
-    p.src_k_stride = src_col_major ? prb->m : 1;
-    if (so.is_grouped(DNNL_ARG_WEIGHTS)) {
-        p.wei_k_stride = prb->n;
-        p.wei_n_stride = 1;
-    } else {
-        const int wei_ndims = p.wei_m->ndims();
-        p.wei_k_stride = p.wei_m->strides()[wei_ndims - 2];
-        p.wei_n_stride = p.wei_m->strides()[wei_ndims - 1];
-    }
+    // Grouped memory strides are queried as well
+    const int src_ndims = p.src_m->ndims();
+    const int wei_ndims = p.wei_m->ndims();
+    p.src_m_stride = p.src_m->strides()[src_ndims - 2];
+    p.src_k_stride = p.src_m->strides()[src_ndims - 1];
+    p.wei_k_stride = p.wei_m->strides()[wei_ndims - 2];
+    p.wei_n_stride = p.wei_m->strides()[wei_ndims - 1];
 
     return p;
 }
